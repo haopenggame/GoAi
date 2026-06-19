@@ -1,31 +1,29 @@
 # Go Spring AI
 
-一个受 Spring AI Alibaba 启发的 Go 语言 AI 应用开发库，提供统一的 API 接口来构建 AI 驱动的应用程序。本库提供与模型无关的抽象层，支持聊天补全、文本嵌入、图像生成、音频处理、RAG（检索增强生成）、工具调用等功能。
+A Go library inspired by Spring AI Alibaba, providing a unified API for building AI-powered applications. This library offers model-agnostic abstractions for chat completion, embeddings, image generation, audio processing, RAG (Retrieval-Augmented Generation), tool calling, and more.
 
-## 特性
+## Features
 
-- **模型无关 API**：最小化代码改动即可切换不同的 AI 服务提供商
-- **聊天客户端**：流畅的 API 支持流式对话交互
-- **嵌入模型**：生成文本向量嵌入
-- **向量存储**：支持相似度搜索的内存向量存储
-- **RAG 支持**：检索增强生成，包含文档处理管道
-- **工具/函数调用**：支持模型调用外部函数
-- **提示词模板**：支持变量替换的动态提示词生成
-- **结构化输出**：将模型输出解析为结构化类型
-- **对话记忆**：对话历史管理
-- **顾问模式**：拦截和修改请求/响应（日志、RAG 等）
-- **多模态支持**：图像生成、视频生成、音频处理
-- **Provider 注册中心**：统一的 AI 服务提供商管理和切换
+- **Model-Agnostic API**: Switch between different AI providers with minimal code changes
+- **Chat Client**: Fluent API for chat interactions with support for streaming
+- **Embedding Models**: Generate vector embeddings for text
+- **Vector Store**: In-memory vector store with similarity search
+- **RAG Support**: Retrieval-Augmented Generation with document processing pipelines
+- **Tool/Function Calling**: Enable models to call external functions
+- **Prompt Templates**: Dynamic prompt generation with variable substitution
+- **Structured Output**: Parse model output into structured types
+- **Chat Memory**: Conversation history management
+- **Advisors**: Intercept and modify requests/responses (logging, RAG, etc.)
 
-## 安装
+## Installation
 
 ```bash
 go get github.com/go-spring/ai
 ```
 
-## 快速开始
+## Quick Start
 
-### 基础聊天
+### Basic Chat
 
 ```go
 package main
@@ -47,371 +45,289 @@ func main() {
 
     ctx := context.Background()
     response, err := chatClient.Prompt().
-        User("法国的首都是哪里？").
+        User("What is the capital of France?").
         CallWithContext(ctx)
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Println(response.Content)
+
+    fmt.Println(response.Content())
 }
 ```
 
-### 使用智谱 AI 异步图像/视频生成
+### Streaming Chat
 
 ```go
-package main
+stream, err := chatClient.Prompt().
+    User("Tell me a story.").
+    StreamWithContext(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer stream.Close()
 
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-
-    "github.com/go-spring/ai/core"
-    "github.com/go-spring/ai/zhipu"
-)
-
-func main() {
-    // 创建智谱 Provider
-    provider := zhipu.NewProvider(os.Getenv("ZHIPU_API_KEY"))
-    
-    // 创建媒体生成服务
-    service := core.NewMediaGenerationService(provider)
-    
-    ctx := context.Background()
-    
-    // 生成图像
-    imageTask, err := service.SubmitImageTask(ctx, "一只可爱的小猫咪", core.AsyncImageOptions{
-        Size:    "1024x1024",
-        Quality: "hd",
-    })
+for {
+    chunk, err := stream.Next()
+    if err == io.EOF {
+        break
+    }
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Printf("图像任务已提交：%s\n", imageTask.ID)
-    
-    // 等待图像生成完成
-    imageResult, err := service.WaitForTask(ctx, imageTask.ID, core.PollOptions{
-        Interval:   5,
-        MaxRetries: 60,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Printf("图像生成完成：%v\n", imageResult.ImageResults)
-    
-    // 生成视频
-    videoTask, err := service.SubmitVideoTask(ctx, "A cat is playing", core.AsyncVideoOptions{
-        Model:     "cogvideox-3",
-        Quality:   "quality",
-        Duration:  5,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Printf("视频任务已提交：%s\n", videoTask.ID)
-    
-    // 等待视频生成完成
-    videoResult, err := service.WaitForTask(ctx, videoTask.ID, core.PollOptions{
-        Interval:   10,
-        MaxRetries: 60,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Printf("视频生成完成：%v\n", videoResult.VideoResults)
+    fmt.Print(chunk.Content)
 }
 ```
 
-### 使用 Provider 注册中心切换不同服务商
+### RAG (Retrieval-Augmented Generation)
 
 ```go
-package main
+// Create embedding model and vector store
+embeddingModel := openai.NewEmbeddingModel(client)
+vectorStore := core.NewSimpleVectorStore(embeddingModel)
 
-import (
-    "context"
-    "fmt"
-    "log"
-
-    "github.com/go-spring/ai/core"
-    "github.com/go-spring/ai/zhipu" // 智谱 AI
-    // _ "github.com/go-spring/ai/jimeng" // 即梦 AI（未来支持）
-    // _ "github.com/go-spring/ai/hunyuan" // 腾讯混元（未来支持）
-)
-
-func main() {
-    // 获取注册中心
-    registry := core.GetProviderRegistry()
-    
-    // 注册智谱 AI（通常在 init() 中自动注册）
-    _ = registry.Register("zhipu", func(config core.ProviderConfig) (core.AsyncMediaProvider, error) {
-        return zhipu.NewProvider(config.APIKey), nil
-    })
-    
-    // 创建智谱媒体生成服务
-    provider, err := registry.CreateProvider("zhipu", core.ProviderConfig{
-        APIKey: "your-api-key",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    service := core.NewMediaGenerationService(provider)
-    
-    ctx := context.Background()
-    result, err := service.GenerateImage(ctx, "美丽的风景", core.AsyncImageOptions{})
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Printf("图像生成成功：%v\n", result.ImageResults)
+// Add documents
+ctx := context.Background()
+documents := []core.Document{
+    core.NewDocument("The Eiffel Tower is in Paris."),
+    core.NewDocument("The Great Wall is in China."),
 }
+vectorStore.Add(ctx, documents)
+
+// Create RAG chain
+retriever := &core.VectorStoreRetriever{VectorStore: vectorStore}
+ragChain := core.NewRAGChain(chatModel, retriever)
+
+// Query
+result, err := ragChain.Run(ctx, "Where is the Eiffel Tower?")
 ```
 
-### RAG 文档问答
+### Tool Calling
 
 ```go
-package main
+registry := core.NewToolRegistry()
 
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
+// Register a tool
+weatherTool := core.NewFunctionToolBuilder("get_weather").
+    WithDescription("Get weather information.").
+    WithParameter("location", "string", "City name", true).
+    Build()
 
-    "github.com/go-spring/ai/core"
-    "github.com/go-spring/ai/openai"
-)
+registry.Register(weatherTool, func(ctx context.Context, args string) (string, error) {
+    // Implement weather lookup
+    return "Sunny, 25°C", nil
+})
 
-func main() {
-    // 创建聊天模型
-    chatModel := openai.NewChatModel(openai.NewClient(os.Getenv("OPENAI_API_KEY")))
-    
-    // 创建嵌入模型
-    embeddingModel := openai.NewEmbeddingModel(openai.NewClient(os.Getenv("OPENAI_API_KEY")))
-    
-    // 创建向量存储
-    vectorStore := core.NewMemoryVectorStore(embeddingModel)
-    
-    // 创建 RAG 管道
-    ragPipeline := core.NewRagPipeline(chatModel, vectorStore)
-    
-    // 添加文档
-    docs := []core.Document{
-        {
-            ID:      "doc1",
-            Content: "Go 语言是一门静态类型、编译型语言，由 Google 开发。",
-        },
-        {
-            ID:      "doc2",
-            Content: "Spring AI Alibaba 是阿里巴巴开源的 AI 应用开发框架。",
-        },
-    }
-    _ = vectorStore.AddDocuments(context.Background(), docs)
-    
-    // 执行 RAG 查询
-    ctx := context.Background()
-    response, err := ragPipeline.Query(ctx, "Go 语言是什么？", core.RagOptions{
-        TopK: 2,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(response)
-}
+// Use tool-calling model
+toolModel := core.NewToolCallingChatModel(chatModel, registry)
+prompt := core.NewPromptBuilder().
+    User("What's the weather in Beijing?").
+    Build()
+
+response, err := toolModel.Call(ctx, prompt)
 ```
 
-### 工具调用
+### Structured Output
 
 ```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-
-    "github.com/go-spring/ai/core"
-    "github.com/go-spring/ai/openai"
-)
-
-// 定义工具
-func getWeather(city string) string {
-    return fmt.Sprintf("%s 的天气是晴天，温度 25°C", city)
+type Person struct {
+    Name string `json:"name"`
+    Age  int    `json:"age"`
 }
 
-func main() {
-    client := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
-    chatModel := openai.NewChatModel(client)
-    
-    // 注册工具
-    toolRegistry := core.NewToolRegistry()
-    toolRegistry.RegisterTool("get_weather", "查询天气", getWeather)
-    
-    // 创建带工具的聊天客户端
-    chatClient := core.NewChatClient(chatModel, core.WithTools(toolRegistry.GetTools()...))
-    
-    ctx := context.Background()
-    response, err := chatClient.Prompt().
-        User("北京天气怎么样？").
-        CallWithContext(ctx)
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println(response.Content)
-}
+var person Person
+parser := core.NewBeanOutputParser(&person)
+generator := core.NewStructuredOutputGenerator(chatModel, parser)
+
+prompt := core.NewPromptBuilder().
+    User("Generate a person named Alice who is 30 years old.").
+    Build()
+
+generator.Generate(ctx, prompt)
+fmt.Printf("Person: %+v\n", person)
 ```
 
-## 支持的 AI 服务提供商
-
-### 已实现
-
-- **智谱 AI**：聊天补全、图像生成、视频生成、异步任务处理
-- **OpenAI**：聊天补全、嵌入、图像生成、音频处理
-
-### 即将支持
-
-- **即梦 AI**：图像生成、视频生成
-- **腾讯混元**：聊天补全、图像生成
-- **其他主流 AI 平台**
-
-## 核心架构
-
-### 分层设计
-
-```
-┌─────────────────────────────────────────────┐
-│           应用层（Application）              │
-│  ChatClient, RagPipeline, MediaService     │
-├─────────────────────────────────────────────┤
-│           抽象层（Abstraction）              │
-│  ChatModel, EmbeddingModel,                │
-│  AsyncMediaProvider, VectorStore           │
-├─────────────────────────────────────────────┤
-│           实现层（Implementation）           │
-│  OpenAI, Zhipu, Hunyuan, Jimeng, ...       │
-└─────────────────────────────────────────────┘
-```
-
-### Provider 模式
-
-```
-┌─────────────────────────────────────────────┐
-│           MediaGenerationService            │  ← 服务层：统一入口
-├─────────────────────────────────────────────┤
-│          AsyncMediaProvider 接口            │  ← 抽象层：跨厂商标准
-│  ├── Name() → string                        │
-│  ├── ImageModel() → AsyncImageModel         │
-│  ├── VideoModel() → AsyncVideoModel         │
-│  └── TaskQuery() → AsyncTaskQuery           │
-├─────────────────────────────────────────────┤
-│  zhipu.Provider  │  jimeng.Provider  │ ...  │  ← 实现层：各厂商适配
-└─────────────────────────────────────────────┘
-```
-
-## 项目结构
-
-```
-GoAi/
-├── core/                    # 核心抽象层和通用实现
-│   ├── model.go            # 核心模型接口定义
-│   ├── provider.go         # Provider 注册中心和服务层
-│   ├── chatclient.go       # 聊天客户端
-│   ├── memory.go           # 对话记忆
-│   ├── rag.go              # RAG 管道
-│   ├── vectorstore.go      # 向量存储
-│   ├── tool.go             # 工具调用
-│   └── test/               # 单元测试
-├── openai/                  # OpenAI 实现
-├── zhipu/                   # 智谱 AI 实现
-│   ├── provider.go         # Provider 实现
-│   ├── client.go           # API 客户端
-│   ├── image.go            # 图像生成
-│   ├── video.go            # 视频生成
-│   └── task.go             # 异步任务处理
-├── examples/                # 示例代码
-│   ├── basic_chat/         # 基础聊天示例
-│   ├── memory/             # 对话记忆示例
-│   ├── rag/                # RAG 示例
-│   ├── tools/              # 工具调用示例
-│   └── zhipu_async/        # 智谱异步媒体生成示例
-└── doc/                     # 文档
-```
-
-## 开发指南
-
-### 添加新的 AI 服务提供商
-
-1. 创建新包（如 `hunyuan/`）
-2. 实现 `AsyncMediaProvider` 接口
-3. 在 `init()` 中注册工厂函数
-4. 编写单元测试
+### Prompt Templates
 
 ```go
-package hunyuan
+// Using Go text/template
+template := core.NewPromptTemplate("Hello, {{.Name}}! You are {{.Age}} years old.")
+result, err := template.Render(map[string]interface{}{
+    "Name": "Alice",
+    "Age":  30,
+})
 
-import (
-    "github.com/go-spring/ai/core"
+// Using simple string substitution
+template2 := core.NewStringPromptTemplate("Hello, {{name}}!")
+result2, err := template2.Render(map[string]interface{}{
+    "name": "World",
+})
+```
+
+### Chat Memory
+
+```go
+memory := core.NewInMemoryChatMemory()
+conversationID := "user-123"
+
+// Add messages
+memory.Add(ctx, conversationID,
+    core.Message{Role: core.RoleUser, Content: "My name is Alice."},
+    core.Message{Role: core.RoleAssistant, Content: "Nice to meet you!"},
 )
 
-const ProviderName = "hunyuan"
+// Retrieve messages
+messages, err := memory.Get(ctx, conversationID, 10)
+```
 
-type Provider struct {
-    // ...
-}
+## Project Structure
 
-func NewProvider(apiKey string) *Provider {
-    // ...
-}
+```
+go-spring/ai/
+├── core/           # Core abstractions and implementations
+│   ├── model.go    # Model interfaces (ChatModel, EmbeddingModel, etc.)
+│   ├── chatclient.go  # Fluent ChatClient API
+│   ├── prompt.go   # Prompt templates and builders
+│   ├── vectorstore.go # Vector store interfaces and implementations
+│   ├── rag.go      # RAG chain and document processing
+│   ├── tool.go     # Tool/function calling
+│   ├── output.go   # Output parsers
+│   ├── memory.go   # Chat memory management
+│   └── utils.go    # Utility functions
+├── openai/         # OpenAI implementation
+│   ├── client.go   # OpenAI API client
+│   ├── chat.go     # OpenAI ChatModel
+│   ├── embedding.go # OpenAI EmbeddingModel
+│   ├── image.go    # OpenAI ImageModel
+│   └── audio.go    # OpenAI AudioModel
+└── examples/       # Example applications
+    ├── basic_chat/
+    ├── rag/
+    ├── tools/
+    ├── structured_output/
+    ├── memory/
+    └── streaming/
+```
 
-func (p *Provider) Name() string {
-    return ProviderName
-}
+## Core Concepts
 
-func (p *Provider) ImageModel() core.AsyncImageModel {
-    // ...
-}
+### Models
 
-func (p *Provider) VideoModel() core.AsyncVideoModel {
-    // ...
-}
+The library defines several model interfaces:
 
-func (p *Provider) TaskQuery() core.AsyncTaskQuery {
-    // ...
-}
+- **ChatModel**: For text generation and conversation
+- **EmbeddingModel**: For generating vector embeddings
+- **ImageModel**: For image generation
+- **AudioModel**: For audio transcription and synthesis
 
-func init() {
-    _ = core.RegisterProvider(ProviderName, func(config core.ProviderConfig) (core.AsyncMediaProvider, error) {
-        return NewProvider(config.APIKey), nil
-    })
+### ChatClient
+
+The `ChatClient` provides a fluent API for interacting with chat models:
+
+```go
+client := core.NewChatClient(model)
+response, err := client.Prompt().
+    System("You are a helpful assistant.").
+    User("Hello!").
+    WithTemperature(0.7).
+    WithMaxTokens(100).
+    Call()
+```
+
+### Advisors
+
+Advisors intercept and modify requests and responses:
+
+- **QuestionAnswerAdvisor**: Implements RAG by augmenting prompts with retrieved documents
+- **SimpleLoggerAdvisor**: Logs requests and responses
+- **ChatMemoryAdvisor**: Adds conversation history to prompts
+
+### Vector Store
+
+The `VectorStore` interface provides methods for storing and retrieving documents:
+
+```go
+type VectorStore interface {
+    Add(ctx context.Context, documents []Document) error
+    Delete(ctx context.Context, ids []string) error
+    SimilaritySearch(ctx context.Context, query string, options SearchOptions) ([]Document, error)
 }
 ```
 
-## 测试
+### Document Processing
 
-运行所有测试：
+The ETL pipeline supports document loading, transformation, and storage:
+
+```go
+pipeline := core.NewETLPipeline(loader, writer)
+pipeline.AddTransformer(&core.SplitterTransformer{Splitter: splitter})
+pipeline.AddTransformer(&core.MetadataTransformer{Metadata: map[string]interface{}{"source": "web"}})
+pipeline.Run(ctx)
+```
+
+## Configuration
+
+### OpenAI Client Options
+
+```go
+client := openai.NewClient(
+    apiKey,
+    openai.WithBaseURL("https://api.openai.com/v1"),
+    openai.WithModel("gpt-4"),
+    openai.WithHTTPClient(&http.Client{Timeout: 120 * time.Second}),
+)
+```
+
+## Error Handling
+
+The library uses Go's standard error handling patterns. All operations return errors that can be checked and handled:
+
+```go
+response, err := chatClient.Prompt().User("Hello").Call()
+if err != nil {
+    // Handle error
+    log.Printf("Chat failed: %v", err)
+    return
+}
+```
+
+## Retry and Rate Limiting
+
+The library provides utilities for retry and rate limiting:
+
+```go
+config := core.RetryConfig{
+    MaxRetries: 3,
+    Delay:      time.Second,
+    RetryableFn: func(err error) bool {
+        return isTemporaryError(err)
+    },
+}
+
+err := core.Retry(config, func() error {
+    _, err := chatModel.Call(ctx, prompt)
+    return err
+})
+```
+
+## Testing
+
+Run the test suite:
 
 ```bash
 go test ./...
 ```
 
-运行特定包的测试：
+## Examples
 
-```bash
-go test ./zhipu/... -v
-go test ./core/test/... -v
-```
+See the `examples/` directory for complete working examples:
 
-## 贡献
+- `basic_chat/` - Basic chat interactions
+- `rag/` - Retrieval-Augmented Generation
+- `tools/` - Tool/function calling
+- `structured_output/` - Structured output parsing
+- `memory/` - Chat memory management
+- `streaming/` - Streaming responses
 
-欢迎提交 Issue 和 Pull Request！
-
-## 许可证
+## License
 
 MIT License
-
-## 致谢
-
-- [Spring AI Alibaba](https://github.com/alibaba/spring-ai-alibaba) - 设计灵感来源
-- [LangChain](https://github.com/langchain-ai/langchain) - RAG 和工具调用设计参考
-- [智谱 AI](https://open.bigmodel.cn/) - 异步 API 文档支持
